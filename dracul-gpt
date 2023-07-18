@@ -18,7 +18,7 @@ COLOR_USER = 'blue'
 COLOR_RESPONSE = 'yellow'
 COLOR_ERROR = 'red'
 
-MESSAGE_CHATGPT = " [*] ChatGPT: "
+MESSAGE_CHATGPT = " [*] DraculGPT: "
 MESSAGE_USER = " [*] Você: "
 
 username = ''
