@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+
+import openai
+import sys
+import os
+from pygments import highlight
+from pygments.lexers import get_lexer_by_name
+from pygments.formatters import Terminal256Formatter
+from termcolor import colored
+
+API_KEY = 'INSIRA_SUA_API_DO_CHATGPT'
+
+MAX_TOKENS = 4096
+MIN_RESPONSE_TOKENS = 100
+
+COLOR_HEADER = 'green'
+COLOR_USER = 'blue'
+COLOR_RESPONSE = 'yellow'
+COLOR_ERROR = 'red'
+
+MESSAGE_CHATGPT = " [*] ChatGPT: "
+MESSAGE_USER = " [*] Você: "
+
+username = ''
+chat_log = ''
+RUNNING = False
+
+FRASE_DE_BOAS_VINDAS = 'Diga "Olá {username}!" e depois, de maneira ordenada e numérica, me diga como você pode me ajudar em meu pentest.'
+FRASE_DE_FORCA = 'Forneça uma resposta detalhada e completa.'
+
+def get_response(request, chat_log, force_request=True):
+    if force_request:
+        request = request + f"\n{FRASE_DE_FORCA}"
+    
+    chat_log += MESSAGE_USER + request + "\n"
+    prompt = chat_log + MESSAGE_CHATGPT
+    prompt_length = len(prompt.encode('utf-8'))
+
+    final_response = ''
+
+    if prompt_length > MAX_TOKENS - MIN_RESPONSE_TOKENS:
+        split_prompt = prompt.split(' ')
+        while len(' '.join(split_prompt).encode('utf-8')) > MAX_TOKENS - MIN_RESPONSE_TOKENS:
+            split_prompt = split_prompt[1:]
+        prompt = ' '.join(split_prompt)
+
+    try:
+        response = openai.Completion.create(
+            model="text-davinci-003",
+            prompt=prompt,
+            max_tokens=max(MIN_RESPONSE_TOKENS, MAX_TOKENS - len(prompt.encode('utf-8'))),
+            temperature=0.5,
+            top_p=0.9,
+            n=1,
+            stop=None,
+            echo=False,
+            api_key=API_KEY
+        )
+
+        final_response = response.choices[0].text.strip()
+
+        is_script = detect_script(final_response)
+        if is_script:
+            language = detect_language(final_response)
+            final_response = colorize_code(final_response, language)
+
+    except openai.error.APIError as e:
+        print_colored(f'\n [*] Erro na API do OpenAI: {str(e)}', COLOR_ERROR)
+        return str(e), chat_log
+    except Exception as e:
+        #print_colored(f'\n [*] Erro ao obter resposta: {str(e)}', COLOR_ERROR)
+        return str(e), chat_log
+
+    chat_log += MESSAGE_CHATGPT + final_response + "\n"
+    return final_response, chat_log
+
+def detect_script(response):
+    return any(line.startswith('    ') for line in response.split('\n'))
+
+def detect_language(response):
+    if 'def ' in response or 'import ' in response:
+        return 'python'
+    elif 'function ' in response or 'var ' in response:
+        return 'javascript'
+    elif '#include ' in response:
+        return 'c'
+    elif '#include ' in response and 'iostream' in response:
+        return 'cpp'
+    elif 'public class ' in response:
+        return 'java'
+    elif '<html' in response or '<body' in response:
+        return 'html'
+    elif '{' in response and '}' in response and ':' in response and ';' in response:
+        return 'css'
+    elif '$' in response:
+        return 'shell'
+    elif '@echo off' in response.lower():
+        return 'batch'
+    elif 'echo ' in response:
+        return 'bash'
+    else:
+        return 'text'
+
+def colorize_code(code, language):
+    try:
+        lexer = get_lexer_by_name(language, stripall=True)
+        formatter = Terminal256Formatter(style='native')
+        colored_code = highlight(code, lexer, formatter)
+    except Exception as e:
+        return code
+    return colored_code
+
+def print_colored(text, color):
+    print(colored(text, color))
+
+def clear_screen():
+    if os.name == 'posix':
+        os.system('clear')
+    else:
+        os.system('cls')
+
+def display_header():
+    print_colored("    ==================================================================================", COLOR_HEADER)
+    print_colored("             		Dracul ChatGPT For Pentesting				       ", COLOR_HEADER)
+    print_colored("    ==================================================================================", COLOR_HEADER)    
+    print_colored("    Desenvolvido por Fábio Monteiro(Dracul)", COLOR_HEADER)
+    print_colored("    LinkedIn: https://www.linkedin.com/in/fabio-silva-monteiro/", COLOR_HEADER)
+    print_colored("    GitHub: https://github.com/fabiosilvamonteiro/", COLOR_HEADER)
+    print_colored("    ==================================================================================", COLOR_ERROR)
+    print_colored("    Não me responsabilizo por nenhuma atividade criminosa.", COLOR_ERROR)
+    print_colored("    O Script deve ser utilizado para fins educacionais e não ilegais.", COLOR_ERROR)
+    print_colored("    ==================================================================================", COLOR_ERROR)
+    print_colored("    * Você pode fazer perguntas gerais, pedir explicações ou solicitar", COLOR_HEADER)
+    print_colored("    a geração de um script ou código em qualquer linguagem relacionado a pentest.", COLOR_HEADER)
+    print_colored("    ==================================================================================", COLOR_HEADER)
+    print_colored("    		       Digite 'sair' para encerrar.", COLOR_HEADER)
+    print_colored("    ==================================================================================", COLOR_HEADER)
+
+def initialize():
+    global chat_log, RUNNING, username
+    clear_screen()
+    print(" ")
+    print_colored("\n" + MESSAGE_CHATGPT, COLOR_RESPONSE)
+    while True:
+        username = input(colored("\n [*] Digite seu nome: ", COLOR_RESPONSE))
+        if username.strip() != '':
+            break
+        else:
+            print_colored(" \n [*] Por favor, forneça um nome válido.", COLOR_ERROR)
+    global MESSAGE_USER
+    MESSAGE_USER = f" [*] {username}: "
+    clear_screen()
+    if chat_log == '':
+        response, chat_log = get_response(FRASE_DE_BOAS_VINDAS.format(username=username), chat_log, False)
+        display_header()
+        print_colored("\n" + MESSAGE_CHATGPT + "\n", COLOR_RESPONSE)
+        print_colored(" [*] " + response, COLOR_RESPONSE)
+
+def interact():
+    global chat_log, RUNNING
+    
+    if not RUNNING:
+        initialize()
+
+    try:
+        openai.api_key = API_KEY
+    except Exception as e:
+        print_colored(f'\n [*] Erro ao definir a chave de API: {str(e)}', COLOR_ERROR)
+        sys.exit(1)
+
+    while True:
+        try:
+            request = input(colored("\n" + MESSAGE_USER, COLOR_USER))
+            if request.lower() == 'sair':
+                sys.exit(1)
+                break
+            elif request.lower() == 'clear':
+                clear_screen()
+                display_header()
+                RUNNING = True
+                interact()
+            else:
+                response, chat_log = get_response(request, chat_log)
+
+            response = response + "\n"
+            print_colored("\n==================================", COLOR_RESPONSE)
+            print_colored("\n" + MESSAGE_CHATGPT + "\n", COLOR_RESPONSE)
+            print_colored(response, COLOR_RESPONSE)
+            print_colored("==================================", COLOR_RESPONSE)
+
+        except KeyboardInterrupt:
+            print_colored('\nInterrompido pelo usuário. Saindo...', COLOR_ERROR)
+            break
+        except Exception as e:
+            print_colored(f'\n [*] Erro: {str(e)}. Por favor, tente novamente.', COLOR_ERROR)
+            continue
+
+if __name__ == "__main__":
+    interact()
